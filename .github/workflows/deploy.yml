@@ -1,0 +1,74 @@
+# This workflow deploys the full solution
+
+name: Deploy Solution
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  environment:
+    name: Determine Environment Name
+    uses: ./.github/workflows/environment-name.yaml     
+
+  validate:
+    needs: [environment]
+    name: Validate Environment Secrets
+    uses: ./.github/workflows/validate-secrets.yaml
+    with:
+      environment: ${{ needs.environment.outputs.name }}
+    secrets: 
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+      AZURE_SUFFIX: ${{ secrets.AZURE_SUFFIX }}
+      AZURE_ADMIN_USERNAME: ${{ secrets.AZURE_ADMIN_USERNAME }}
+      AZURE_ADMIN_PASSWORD: ${{ secrets.AZURE_ADMIN_PASSWORD }}
+
+  test:
+    needs: [validate]
+    name: Deploy Bicep 
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ needs.environment.outputs.name }}
+    
+    steps:
+      - uses: actions/checkout@v2   
+      - name: Build
+        run: |
+          az bicep build --file ./iac/main.bicep
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Test
+        run: |
+          az deployment sub what-if --name ${{ needs.environment.outputs.name }} \
+                                  --location ${{ secrets.AZURE_LOCATION }} \
+                                  --template-file ./iac/main.bicep \
+                                  --parameters name=${{ needs.environment.outputs.name }} \
+                                  --parameters location=${{ secrets.AZURE_LOCATION }} \
+                                  --parameters uniqueSuffix=${{ secrets.AZURE_SUFFIX }} \
+                                  --parameters adminUsername=${{ secrets.AZURE_ADMIN_USERNAME }} \
+                                  --parameters adminPassword=${{ secrets.AZURE_ADMIN_PASSWORD }} \
+
+  deploy:
+    needs: [test]
+    name: Deploy Bicep 
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ needs.environment.outputs.name }}
+    
+    steps:
+      - uses: actions/checkout@v2   
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Deploy
+        run: |
+          az deployment sub create --name ${{ needs.environment.outputs.name }} \
+                                  --location ${{ secrets.AZURE_LOCATION }} \
+                                  --template-file ./iac/main.bicep \
+                                  --parameters name=${{ needs.environment.outputs.name }} \
+                                  --parameters location=${{ secrets.AZURE_LOCATION }} \
+                                  --parameters uniqueSuffix=${{ secrets.AZURE_SUFFIX }} \
+                                  --parameters adminUsername=${{ secrets.AZURE_ADMIN_USERNAME }} \
+                                  --parameters adminPassword=${{ secrets.AZURE_ADMIN_PASSWORD }} \
